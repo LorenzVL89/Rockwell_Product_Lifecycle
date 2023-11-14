@@ -38,49 +38,39 @@ def get_status(ra_part_number):
     # Make the API request
     response = requests.get(base_url, params=params, headers=headers)
 
-    # Check if the response status code is 200 (OK)
-    if response.status_code == 200:
-        # Parse and return the response data as JSON
-        return response.json()
-    else:
-        # Return an error message if the status code is not 200
-        raise requests.HTTPError(f"Request failed with status code {response.status_code}")
+    # Raise an HTTPError for non-200 status codes
+    response.raise_for_status()
+
+    return response.json()
+
+
+def process_data(row):
+    part_number = row['Part No.']
+    data = get_status(part_number)
+
+    if 'response' in data and 'docs' in data['response']:
+        for doc in data['response']['docs']:
+            if part_number == doc['catalogNumber']:
+                row['Description'] = str(doc.get('technicalDescription', ''))
+                row['Lifecycle status'] = str(doc.get('lifecycleStatus', ''))
+                if 'discontinuedDate' in doc:
+                    discontinued_date_str = doc['discontinuedDate']
+                    discontinued_date = datetime.fromisoformat(discontinued_date_str.replace('Z', '+00:00'))
+                    row['Discontinued date'] = discontinued_date.strftime('%Y-%m-%d')
+                if 'replacementText' in doc and 'replacementCategory' in doc:
+                    row['Replacement Part No.'] = str(doc.get('replacementText', ''))
+                    row['Replacement category'] = str(doc.get('replacementCategory', ''))
+    return row
 
 
 if __name__ == "__main__":
-    # Get the user input for the part number
-    # part_number = input("Enter the RA Part Number: ").upper()
-
     # Define the location of the Excel document
     excel_file = easygui.fileopenbox()
     # Get the part numbers from an Excel Spreadsheet (first Column)
     df = pd.read_excel(excel_file)
 
-    # Explicitly set the dtype for columns that will be updated
-    df['Description'] = df['Description'].astype(str)
-    df['Lifecycle status'] = df['Lifecycle status'].astype(str)
-    df['Discontinued date'] = df['Discontinued date'].astype(object)  # or adjust to the appropriate dtype
-    df['Replacement Part No.'] = df['Replacement Part No.'].astype(str)
-    df['Replacement category'] = df['Replacement category'].astype(str)
-
-    for i, row in df.iterrows():
-        part_number = row['Part No.']
-        # print(part_number)
-        data = get_status(part_number)
-        if 'response' in data and 'docs' in data['response']:
-            for y, doc in enumerate(data['response']['docs']):
-                if part_number == doc['catalogNumber']:
-                    df.at[i, 'Description'] = str(doc['technicalDescription'])
-                    # print(row['Description'])
-                    df.at[i, 'Lifecycle status'] = str(doc['lifecycleStatus'])
-                    # print(row['Lifecycle status'])
-                    if 'discontinuedDate' in doc:
-                        discontinued_date_str = doc['discontinuedDate']
-                        discontinued_date = datetime.fromisoformat(discontinued_date_str.replace('Z', '+00:00'))
-                        df.at[i, 'Discontinued date'] = discontinued_date.strftime('%Y-%m-%d')
-                    if 'replacementText' in doc and 'replacementCategory' in doc:
-                        df.at[i, 'Replacement Part No.'] = str(doc['replacementText'])
-                        df.at[i, 'Replacement category'] = str(doc['replacementCategory'])
+    # Apply the process_data function to each row using apply
+    df = df.apply(process_data, axis=1)
 
     # Save the updated dataframe to a new Excel file with a timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
